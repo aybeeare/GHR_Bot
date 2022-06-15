@@ -5,19 +5,9 @@ from tkinter.tix import DisplayStyle
 import yaml
 import pandas as pd
 import matplotlib.pyplot as plt 
-import webbrowser
-import datetime
 import csv
-import re
-import sys
-import time
 import json
 import urllib.request
-
-# # Global variables
-# global div
-# global days
-# global pv_attempts
 
 # Read API Keys from Config File
 with open("config.yml", "r") as ymlfile:
@@ -190,8 +180,6 @@ def generate_price_volume_data():
     for ticker_index in range(len(tick_list) -1):      
         global index
         index = ticker_index
-        print('Tick List: ', tick_list)
-        print('Index: ', index)
         global days
         days = 60
         global div
@@ -202,16 +190,12 @@ def generate_price_volume_data():
         print(tick_list[index], 'API Status', api_status)
         pv_attempt_status = pv_attempt()
         while pv_attempt_status == -2:
-            print('Current Days: ', days) 
-            print('Current Div: ', div)
             api_pull(days)
             pv_stat = pv_attempt()
             if pv_stat == 0:
                 del cum_vol_points[0:2] 
                 del price_points[0:2]
                 print('Finally PV Works!: ', tick_list[index])
-                print('NOG: ', cum_vol_points)
-                print('NOG: ', price_points)
                 break
              
         print(tick_list[index], 'PV Status: ', pv_attempt_status)
