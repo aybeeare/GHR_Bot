@@ -162,9 +162,7 @@ def generate_price_volume_data():
     print(tick_list)
 
         
-# print(hist)
-# print(list(hist.columns))
-
+# This was an initial debugging version, now refer to the main python script...
 # print(len(close))
 # print(len(vol))
 # plt.plot(vol, close)
