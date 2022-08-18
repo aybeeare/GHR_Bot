@@ -1,22 +1,26 @@
 # GHR Bot will execute the investing stategy of Gerald Harris Rosen based on his book "A New Science of Stock Market Investing, 
 # A Physicist Takes on Wall Street", coded by his grandson, Aaron Belkin-Rosen.
 
+import platform
 import os
 import csv
+import datetime
+import html_to_json
 import json
 import urllib.request
+from bs4 import BeautifulSoup
 
 def setup():
     welcome = input("Welcome to GHR BOT! Is this your first time using it? (Y/N)")
     if welcome == 'Y':
-        os_type = input("Is your PC running a Windows or Linux OS? (W/L)")
-        if os_type == 'W':
+        os_type = platform.system() # returns 'Windows', 'Linux', or 'Darwin' (mac is Darwin lol)
+        if os_type == 'Windows':
             print('INSTALLING PYTHON LIBRARIES FOR WINDOWS...')
             os.system('python -m pip install --upgrade pip')
             os.system('pip install PyYAML')
             os.system('pip install matplotlib')
             os.system('pip install pandas')
-            print('DONE INSTALLING PYTHON LIBRARIES!!')
+            print('DONE INSTALLING PYTHON LIBRARIES!')
 
             # import libraries after install
 
@@ -27,14 +31,14 @@ def setup():
             global plt
             import matplotlib.pyplot as plt
 
-        elif os_type == 'L':
+        elif os_type == 'Linux' | 'Darwin':
             print('INSTALLING PYTHON LIBRARIES FOR LINUX...')
             os.system('sudo apt-get update')
             os.system('sudo apt-get -y install python3-pip')
             os.system('pip3 install PyYAML')
             os.system('pip3 install matplotlib')
             os.system('pip3 install pandas')
-            print('DONE INSTALLING PYTHON LIBRARIES!!')
+            print('DONE INSTALLING PYTHON LIBRARIES!')
 
             # import libraries after install
 
@@ -55,19 +59,6 @@ def setup():
         global plt
         import matplotlib.pyplot as plt
 
-# Filter NYSE Stocks and CIK
-def nyse_filter():
-    nyse_csv = pd.read_csv('nyse_stocks.csv') # download from https://www.nasdaq.com/market-activity/stocks/screener 
-    # and save in same directory as python script
-    nyse_list = nyse_csv['Symbol'].tolist()
-    nyse_list_clean = list()
-    # finds a ^ character in stock symbol and removes it from list
-    for i in range(len(nyse_list)):
-        if nyse_list[i].find('^') != -1: # contains ^
-            continue
-        else:
-            nyse_list_clean.append(nyse_list[i]) 
-
 # Find stocks with significant insider buying (transactions > $100,000)
 def find_sib_stocks():
     API_KEY_INSIDER_TRADING = cfg["API_KEY_INSIDER_TRADING"]
@@ -78,12 +69,15 @@ def find_sib_stocks():
     response = urllib.request.urlopen(req) # send request to API
     res_body = response.read().decode('utf-8') # read response
     filingsJson = json.loads(res_body) # transform response into json (data is list of dictionaries)
-    
+    print(type(filingsJson))
     # Find sib stocks (includes all stock market indices (NYSE, NASDAQ, ...)
     # and write to csv file for personal historical documentation
     current_dir = os.getcwd()
     file_path = current_dir + '\ghr_bot_sib_record.csv'
-    f = open(file_path, 'a', newline = '')
+    try:
+        f = open(file_path, 'a', newline = '')
+    except:
+        print('ERROR: Please close excel spreadsheet "ghr_bot_sib_record.csv and run program again\n\n')
 
     global tick_list 
     tick_list = list() # no reps in ticks
@@ -92,16 +86,16 @@ def find_sib_stocks():
 
     for dics in filingsJson:
         tick = dics.get('symbol')
-        trans_type = dics.get('acquistionOrDisposition') # 'A' or 'D'
+        trans_type = dics.get('transactionType')[0] # 'S-Sale' or 'P-Purchase'
         trans_amount = int(dics.get('price'))*int(dics.get('securitiesTransacted'))
         trans_date = dics.get('transactionDate')
         buyer = dics.get('reportingName')
-        if trans_type == 'A' and trans_amount > 500000:
+        if trans_type == 'P' and trans_amount > 300000:
             if tick not in tick_list:
-                new_row = [tick, trans_type, trans_amount, trans_date, buyer] 
-                writer_obj = csv.writer(f)
                 df = pd.read_csv(file_path)
                 if (trans_date not in df['Trans Date'].values.tolist() or tick not in df['Symbol'].values.tolist() or buyer not in df['Buyer']):
+                    new_row = [tick, trans_type, trans_amount, trans_date, buyer] 
+                    writer_obj = csv.writer(f)
                     writer_obj.writerow(new_row)     
                 tick_list.append(tick)
             if tick not in sib_dict_count:
@@ -110,10 +104,82 @@ def find_sib_stocks():
                 sib_dict_count[tick] += 1          
     f.close()
 
+# Find signficant politician buys in the last year
+def find_sib_politician_stocks():
+    # Find current date
+    date = str(datetime.date.today()).split('-')
+    yr, mth, day = date
+
+    # Get Json for House and Senate
+    url_house = 'https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json'
+    url_senate = 'https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json'
+    req_house = urllib.request.Request(url_house) # instantiate request
+    response_house = urllib.request.urlopen(req_house) # send request to API
+    res_body_house = response_house.read().decode('utf-8') # gives a json string
+    json_house = json.loads(res_body_house)
+    req_senate = urllib.request.Request(url_senate) # instantiate request
+    response_senate = urllib.request.urlopen(req_senate) # send request to API
+    res_body_senate = response_senate.read().decode('utf-8') # gives a json string
+    json_senate = json.loads(res_body_senate)
+    count_senate = 0
+    count_house = 0
+    
+    # Prints all the house politician buys
+    for x in json_house: 
+        trans_date = x['transaction_date'].split('-')
+        year, month, day = trans_date
+        if (((int(mth) - int(month) <= 12) and yr == year) or (int(yr) - int(year) == 1 and (int(month) > int(mth)))) and ('purchase' in x['type']): # logic for less than one year
+            print(x['representative'], x['transaction_date'], x['type'], x['ticker'], x['amount'], count_house)
+            count_house += 1
+    print('House Buys: ', count_house)  
+            
+    # Prints all the senate politician buys
+    for x in json_senate:
+        trans_date = x['transaction_date'].split('/')
+        month, day, year = trans_date
+        if (((int(mth) - int(month) <= 12) and yr == year) or (int(yr) - int(year) == 1 and (int(month) > int(mth)))) and ('Purchase' in x['type']): # logic for less than one year
+            print(x['senator'], x['transaction_date'], x['type'], x['ticker'], x['amount'], count_senate)
+            count_senate += 1
+    print('Senate Buys: ', count_senate) 
+        
+    
 # Find stocks with significant insider buying (transactions > $100,000)
-def find_sis_of_sibs():
-    pass
-    # going to be very similar to find_sib function
+def find_sis_of_portfolio():
+    API_KEY_INSIDER_TRADING = cfg["API_KEY_INSIDER_TRADING"]
+    API_Key_Insider = API_KEY_INSIDER_TRADING + TOKEN
+
+    # Pull Insider Trading Data from API
+    req = urllib.request.Request(API_Key_Insider) # instantiate request
+    response = urllib.request.urlopen(req) # send request to API
+    res_body = response.read().decode('utf-8') # read response
+    filingsJson = json.loads(res_body) # transform response into json (data is list of dictionaries)
+    
+    # Open sib record and get list of symbols
+    current_dir = os.getcwd()
+    file_path = current_dir + '\my_portfolio.csv'
+
+    try:
+        f = open(file_path, 'a+')
+    except:
+        print('ERROR: Please close excel spreadsheet "my_portfolio.csv" and run program again\n\n')
+
+    portfolio_list = ['NRDY', 'WAL', 'CFLT', 'PARA', 'DNB', 'OXY', 'NILE', 'RVMD', 'SUP', 'TDW', 'ET']
+
+    # Compare significant insider sells with portfolio holdings, if match, alert...
+    for dics in filingsJson:
+        tick = dics.get('symbol')
+        trans_type = dics.get('transactionType')[0] # 'S-Sale' or 'P-Purchase'
+        trans_amount = int(dics.get('price'))*int(dics.get('securitiesTransacted'))
+        trans_date = dics.get('transactionDate')
+        seller = dics.get('reportingName')
+        if trans_type == 'S' and trans_amount > 100000 and tick in portfolio_list:
+            df = pd.read_csv(file_path)
+            if (trans_date not in df['Trans Date'].values.tolist() or tick not in df['Symbol'].values.tolist() or seller not in df['Seller']):
+                new_row = [tick, trans_type, trans_amount, trans_date, seller] 
+                writer_obj = csv.writer(f)
+                writer_obj.writerow(new_row)     
+                # send notification of insider sell with all details!       
+    f.close()
 
 # Function to pull JSON data from API
 def api_pull(days):
@@ -198,19 +264,19 @@ def pv_attempt():
 
                         else: # do another api pull going back farther and attempt to generate pv again
                             print('Doing another API Pull For: ', tick_list[index])
-                            days = days + 20
-                            div = div + 10
+                            days = days + 10 # this works way better with starting at 40 days and div = 20...
+                            div = div + 5
                             return -2
                             
                     else:
                         continue
                 
-            if count % 2: # Every 2 days collect data for PV graph formation after tracking for 1 month
-                close_price = float(DailyJson['historical'][i]['close'])
-                cum_vol += int(DailyJson['historical'][i]['volume'])
-                price_points.append(close_price)
-                cum_vol_points.append(cum_vol)
-        
+            # Once delta vee found, pull every day
+            close_price = float(DailyJson['historical'][i]['close'])
+            cum_vol += int(DailyJson['historical'][i]['volume'])
+            price_points.append(close_price)
+            cum_vol_points.append(cum_vol)
+    
         cum_vol_points = [x * 0.000001 for x in cum_vol_points] # convert vol to millions of shares and round to 2 decimals
         cum_vol_points = [round(x,3) for x in cum_vol_points]
         del cum_vol_points[1] 
@@ -224,59 +290,101 @@ def pv_attempt():
         return -1
          # move to next iteration until first month tracked is done
 
-def classify_pv_bearish_bullish(vol_inputs, price_inputs):
-    global classification_dict
+def classify_pv_bearish_bullish(vol_inputs, price_inputs): 
+    PERCENT_TOLERANCE = 0.06
     classification = 'Bearish'
-    classification_dict = dict()
     print('Currently PV Classifying... ', tick_list[index])
-    cum_vol_inputs = vol_inputs  
+    cum_vol_inputs = vol_inputs # vol_inputs and price_inputs generated from pv attempt 
     price_point_inputs = price_inputs
     counts = 0
     indices_list = list()
+    print(tick_list[index], 'Cum_Vol_Points: ', cum_vol_inputs)
+    print(tick_list[index], 'Price_Points: ', price_point_inputs)
     try: # try to get delta vee points from data, if not, break it
-        delta_vee = cum_vol_inputs[2] - cum_vol_inputs[1] 
-        delta_vee_vol_min = cum_vol_inputs[2]
-        delta_vee_price_min = price_point_inputs[2]
+        delta_vee = cum_vol_inputs[2] - cum_vol_inputs[1]
+        print(tick_list[index],'Delta Vee: ', delta_vee) 
+        delta_vee_vol_start = cum_vol_inputs[2]
+        delta_vee_price_start = price_point_inputs[2]
     except:
         print('Failed to generate delta vee for: ', tick_list[index])
         return -1
     
     # doesnt account for multiple cycles in one graph!!!
+    print('Length Cum_Vol_Inputs: ',len(cum_vol_inputs))
     for i in range(len(cum_vol_inputs)):
         counts += 1
         if counts > 3: # look at points starting at end of delta v and check volume criteria for classifiation switch
             indices_list.append(i)
-            if (cum_vol_inputs[i] > (delta_vee_vol_min + delta_vee)): # volume criteria for classification switch passed
-                print('Indices List: ', indices_list) # indices after delta vee scanned for next eligible switch evaluation
-                delta_vee_vol_min = cum_vol_inputs[i] # update starting vol for next classification switch cycle
+            print('Current Cum_Vol: ', cum_vol_inputs[i])
+            print('Current Price Point: ', price_point_inputs[i])
+            if (cum_vol_inputs[i] > (delta_vee_vol_start + delta_vee)) and classification == 'Bearish': # volume criteria for classification switch passed
+                classified = False 
+
                 for idx in indices_list:
-                    print('Current Delta Vee Index Is: ', idx)
-                    print('Delta Vee Price List: ', price_point_inputs[(indices_list[0]):(indices_list[-1])])
-                    print('Delta Vee Vol List: ', cum_vol_inputs[(indices_list[0]):(indices_list[-1])])
-                    if price_point_inputs[idx] < delta_vee_price_min:
-                        classification = 'Bearish'
-                        absolute_min = delta_vee_price_min
-                        if idx == indices_list[-1]: 
-                            indices_list.clear()
-                            delta_vee_price_min = absolute_min
-                            break
-                    if all(x > delta_vee_price_min for x in price_point_inputs[(indices_list[0]):(indices_list[-1])]):
-                        classification = 'Bullish'
+
+                    if cum_vol_inputs[idx] - cum_vol_inputs[idx -1] >= delta_vee: # for case where next cum vol is bigger than previous by delta vee.
+                        if price_point_inputs[idx] > price_point_inputs[idx -1]:
+                            classification = 'Bullish'
+                        else:
+                            classification = 'Bearish'
+                        delta_vee_vol_start = cum_vol_inputs[idx]
+                        delta_vee_price_start = price_point_inputs[idx]
                         indices_list.clear()
                         break
-    
-    classification_dict.update({tick_list[index] : classification})
+
+                    if (price_point_inputs[idx] < (delta_vee_price_start - delta_vee_price_start*PERCENT_TOLERANCE)): # If point below start by good amount, keep bearish
+                        delta_vee_vol_start = cum_vol_inputs[indices_list[-1]] # vol and price at last indice of list are start of next delta vee cycle 
+                        delta_vee_price_start = price_point_inputs[indices_list[-1]]
+                        classified = True
+                        
+                    if idx == indices_list[-1] and classified == False: # If last index in indices reached and still false, all were above min!
+                        classification = 'Bullish'
+                        delta_vee_vol_start = cum_vol_inputs[indices_list[-1]]
+                        delta_vee_price_start = price_point_inputs[indices_list[-1]]
+                
+                indices_list.clear()
+                        
+            if (cum_vol_inputs[i] > (delta_vee_vol_start + delta_vee)) and classification == 'Bullish': # volume criteria for classification switch passed
+                classified = False 
+
+                for idx in indices_list:
+                    
+                    if cum_vol_inputs[idx] - cum_vol_inputs[idx -1] >= delta_vee: # for case where next cum vol is bigger than previous by delta vee.
+                        if price_point_inputs[idx] < price_point_inputs[idx -1]:
+                            classification = 'Bearish'
+                        else:
+                            classification = 'Bullish'
+                        delta_vee_vol_start = cum_vol_inputs[idx]
+                        delta_vee_price_start = price_point_inputs[idx]
+                        indices_list.clear()
+                        break
+
+                    if price_point_inputs[idx] > (delta_vee_price_start + delta_vee_price_start*PERCENT_TOLERANCE): # If a point is above start by good amt, keep bullish.
+                        delta_vee_vol_start = cum_vol_inputs[indices_list[-1]] # vol and price at last indice of list are start of next delta vee cycle 
+                        delta_vee_price_start = price_point_inputs[indices_list[-1]]
+                        classified = True
+                             
+                    if idx == indices_list[-1] and classified == False: # If last index in indices reached and still false, all were above min!
+                        classification = 'Bearish'
+                        delta_vee_vol_start = cum_vol_inputs[indices_list[-1]]
+                        delta_vee_price_start = price_point_inputs[indices_list[-1]]
+                
+                indices_list.clear()
+            print(tick_list[index], classification)
+
+    print('Classification is: ', classification)         
+    classification_dict[tick_list[index]] = classification
 
         
 # Generating P-V Graphs for Bearish/Bullish Classification
-def generate_price_volume_data(input_list):
+def generate_pv_and_plot(input_list):
     global tick_list
     tick_list = input_list      
     for ticker_index in range(len(tick_list) -1):      
         global index
         index = ticker_index
         global days
-        days = 60
+        days = 40
         global div
         div = 20
         global pv_attempts
@@ -294,7 +402,6 @@ def generate_price_volume_data(input_list):
                 break
            
         print(tick_list[index], 'PV Status: ', pv_attempt_status)
-        classify_pv_bearish_bullish(cum_vol_points, price_points)
         # Plot PV for Stock:
         try:
             plt.title('PV for Significant Insider Buying Stock: '+ str(tick_list[index])) 
@@ -325,20 +432,68 @@ def gen_sib_positive_pv_graphs():
         print(sib_pos_ticks)
 
         if sib_pos_ticks[-1] == 'DONE':
-            generate_price_volume_data(sib_pos_ticks)
+            generate_pv_and_plot(sib_pos_ticks)
               #sib_pos_ticks = ['SUP','ALDX', 'MVST'] # enter whichever tickers you want to look at...
         else:
-            print('USER INPUT ERROR: Please type "DONE" and press "ENTER" key when finished inputting stocks of interest')
+            print('USER INPUT ERROR: Please type "DONE" and press "ENTER" key when finished inputting stocks of interest/n/n')
+            setup()
+
     # API call by ticker to get insider trading by symbol https://financialmodelingprep.com/api/v4/insider-trading?symbol= + str(tick_list) + '&page=0'
-    
 
-# Execute sequence of function calls to run program
-setup()
+# Generating P-V Graphs for Bearish/Bullish Classification
+def generate_pv_and_classify(input_list):
+    global tick_list
+    tick_list = input_list
+    global classification_dict
+    classification_dict = dict()      
+    for ticker_index in range(len(tick_list) -1):      
+        global index
+        index = ticker_index
+        global days
+        days = 40
+        global div
+        div = 20
+        global pv_attempts
+        pv_attempts = 0
+        api_status = api_pull(days)
+        print(tick_list[index], 'API Status', api_status)
+        pv_attempt_status = pv_attempt()
+        while pv_attempt_status == -2:
+            api_pull(days)
+            pv_attempts += 1
+            print('PV Attempts: ', pv_attempts)            
+            pv_stat = pv_attempt() 
+            if pv_stat == 0:
+                break
+            if pv_attempts > 7:
+                print('Could not generate PV for: ', tick_list[index])
+                break
 
-# Read API Keys from Config File
+        classify_pv_bearish_bullish(cum_vol_points, price_points) 
+    print(classification_dict)  
+
+# Execute sequence of function calls to run program (First release package!)
+import yaml
+import pandas as pd
+import matplotlib.pyplot as plt
+
 with open("config.yml", "r") as ymlfile:
     cfg = yaml.safe_load(ymlfile)
 TOKEN = cfg["TOKEN"]
 
-find_sib_stocks()
-gen_sib_positive_pv_graphs()
+# setup()
+# find_sib_stocks()
+# find_sis_of_portfolio()
+find_sib_politician_stocks()
+# gen_sib_positive_pv_graphs()
+
+
+# Test sequence for classifier
+
+#test_list = ['NRDY', 'WAL', 'ET', 'PARA', 'DNB', 'OXY', 'NILE', 'RVMD', 'SUP', 'TDW', 'DONE']
+# test_list = ['TOP', 'DONE']
+# #test_list = ['SMRT','CODX','TOP','SURG', 'INOD','MEGL','SMSI','WETG','APYX','APDN', 'DONE']
+# generate_pv_and_plot(test_list)
+# generate_pv_and_classify(test_list)
+
+
