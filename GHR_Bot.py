@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 
 with open("config.yml", "r") as ymlfile:
     cfg = yaml.safe_load(ymlfile)
+global TOKEN
 TOKEN = cfg["TOKEN"]
 
 def setup(): # most likely not going to use!
@@ -65,8 +66,87 @@ def setup(): # most likely not going to use!
         global plt
         import matplotlib.pyplot as plt
 
+def list_all_stocks():
+    global stocks_tup
+    list_stocks = 'https://financialmodelingprep.com/api/v3/stock/list?apikey=' + TOKEN
+    req = urllib.request.Request(list_stocks) # instantiate request
+    response = urllib.request.urlopen(req) # send request to API
+    res_body = response.read().decode('utf-8') # read response
+    filingsJson = json.loads(res_body) # transform response into json (data is list of dictionaries)
+    stocks = []
+    for dic in filingsJson:
+        # If keyboard interrupt, break and return stocks_tup
+        if (dic.get('exchangeShortName') == 'NASDAQ' or dic.get('exchangeShortName') == 'NYSE' or dic.get('exchangeShortName') == 'AMEX') and dic.get('type') == 'stock':
+            stocks.append(dic.get('symbol')) 
+    stocks_tup = tuple(stocks)
+
+# Find all sibs for all stocks within the past 2 months
+def recent_sibs():
+    # Find current date and time to check how recent and only run this code periodically and allow for keyboard interrupts
+    date = str(datetime.date.today()).split('-')
+    global yr, mth
+    yr, mth, day = date
+    count = 0
+
+    # Instantiate empty dataframe containing symbol, trans_type, trans_amount, trans_date, buyer
+    COLUMN_NAMES =['Symbol','Trans Type','Trans Amount','Insider', 'Ins Date', 'Senate', 'Sen Date', 'House', 'H Date', 'Press', 'Bargain', 'PV Trend', 'Buy Strength']
+    global df # pass initial df to next functions to complete remaining columns
+    df = pd.DataFrame(columns=COLUMN_NAMES)
+    global symbol_list, trans_list, reg_insider_list
+    symbol_list = []
+    trans_list = []
+    reg_insider_list = []
+
+    API_KEY_INSIDER_BUYING = cfg["API_KEY_INSIDER_TICK"]
+
+    # Conditional for how often to run this code (should be done periodically while GUI is IDLE/Closed and Hidden CSV should be generated)
+
+    for tick in stocks_tup:
+        # if count >= 200: # Run a certain number of times, takes a whle :)
+        #     break
+        count += 1
+
+        #print('Tick: ', tick)
+        API_Key_Insider = API_KEY_INSIDER_BUYING + str(tick) + '&page=0&apikey=' + TOKEN
+        #print('API KEY: ', API_Key_Insider)
+
+        # Pull Insider Trading Data from API
+        req = urllib.request.Request(API_Key_Insider) # instantiate request
+        response = urllib.request.urlopen(req) # send request to API
+        res_body = response.read().decode('utf-8') # read response
+        filingsJson = json.loads(res_body) # transform response into json (data is list of dictionaries)
+        
+        #print(filingsJson)
+
+        # Compare significant insider sells with portfolio holdings, if match, alert...
+        for dics in filingsJson:
+            #print(dics)
+            try:
+                tick = dics.get('symbol')
+                trans_type = dics.get('transactionType')[0] # 'S-Sale' or 'P-Purchase'
+                trans_amount =  (float(dics.get('price')))*(float(dics.get('securitiesTransacted')))
+                trans_date = dics.get('transactionDate')
+                year, month, day = trans_date.split('-')
+                insider = dics.get('reportingName')
+                security = dics.get('securityName')
+            
+            except:
+                print('Continued!', count)
+                continue
+
+            if trans_type == 'P' and trans_amount > 300000 and 'Common' in security and (((int(mth) - int(month) <= 2) and yr == year) or (int(yr) - int(year) == 1 and ((int(month) - int(mth)) >= 10))):
+                if tick not in symbol_list or trans_date not in trans_list or insider not in reg_insider_list:
+                    df.loc[len(df)] = [tick, trans_type, trans_amount, insider, trans_date, None, None, None, None, None, None, None, None] # append new row to end of df
+                    symbol_list.append(tick)
+                    trans_list.append(trans_date)
+                    reg_insider_list.append(insider)
+        
+    # Write df to CSV
+    print(df)
+    df.to_csv('ghr_bot_sib_record2.csv')
+
 # Find stocks with significant insider buying (transactions > $100,000)
-def find_sib_stocks():
+def current_sib_stocks():
     API_KEY_INSIDER_TRADING = cfg["API_KEY_INSIDER_TRADING"]
     API_Key_Insider = API_KEY_INSIDER_TRADING + TOKEN
 
@@ -76,31 +156,32 @@ def find_sib_stocks():
     res_body = response.read().decode('utf-8') # read response
     filingsJson = json.loads(res_body) # transform response into json (data is list of dictionaries)
 
-    # Find sib stocks and create dictionary to combine with senates for master insider collection
-    global tick_list 
-    tick_list = list() # feed tick list into other functions... 
-    global sib_dict
-    sib_dict = dict() # keep track of how many significant insider buys occurred per stock
-    one = True # remains true as long as a dict doesn't have multiple transactions under it
-
     for dics in filingsJson:
         tick = dics.get('symbol')
         trans_type = dics.get('transactionType')[0] # 'S-Sale' or 'P-Purchase'
         trans_amount = int(dics.get('price'))*int(dics.get('securitiesTransacted'))
         trans_date = dics.get('transactionDate')
-        buyer = dics.get('reportingName')
-        if trans_type == 'P' and trans_amount > 300000:
-            tick_list.append(tick) 
-            # check to make sure tick not already in sib_dict before editing sib_dict key
-            if tick not in sib_dict.keys():
-                sib_dict[tick] = [[buyer], [trans_date], [trans_amount], one]
-            else:
-                # append to each list in list of keys
-                pass
+        year, month, day = trans_date.split('-')
+        insider = dics.get('reportingName')
+        security = dics.get('securityName')
+        
+        if trans_type == 'P' and trans_amount > 300000 and 'Common' in security and (((int(mth) - int(month) <= 2) and yr == year) or (int(yr) - int(year) == 1 and ((int(month) - int(mth)) >= 10))):
+                if tick not in symbol_list or trans_date not in trans_list or insider not in reg_insider_list:
+                    df.loc[len(df)] = [tick, trans_type, trans_amount, insider, trans_date, None, None, None, None, None, None, None, None] # append new row to end of df
+                    symbol_list.append(tick)
+                    trans_list.append(trans_date)
+                    reg_insider_list.append(insider)
+
+    # Read ghr_bot_sib_record2.csv as df and append
+
+    # print(filingsJson) 
+    # print('Tick List: ', tick_list)
+    # print('Sib Dict: ', sib_dict)
 
 
-# Find signficant senate buys in the last year
-def find_sib_senate_stocks():
+
+# Extend insiders to track members of senate and house and consolidate in dataframe
+def sib_extend():
     # Open Record of SIBs in past few months
     current_dir = os.getcwd()
     
@@ -141,14 +222,16 @@ def find_sib_senate_stocks():
     for x in json_house: 
         trans_date = x['transaction_date'].split('-')
         year, month, day = trans_date
+
         if (((int(mth) - int(month) <= 12) and yr == year) or (int(yr) - int(year) == 1 and (int(month) > int(mth)))) and ('purchase' in x['type']): # logic for less than one year
             # Check if ticker already in house dict, if not, instantiate, if it is, append to list
-            if x['ticker'] in house_dict.keys():
+            if x['ticker'] not in house_dict.keys():
+                house_dict[x['ticker']] = [[x['representative']], [x['transaction_date']], [x['amount']]]
+            else:
                 house_dict[x['ticker']][0].append(x['representative'])
                 house_dict[x['ticker']][1].append(x['transaction_date'])
                 house_dict[x['ticker']][2].append(x['amount'])
-            else:
-                house_dict[x['ticker']] = [[x['representative']], [x['transaction_date']], [x['amount']]]
+                
             
     # Prints all the senate senate buys
     for x in json_senate:
@@ -156,86 +239,17 @@ def find_sib_senate_stocks():
         month, day, year = trans_date
         if (((int(mth) - int(month) <= 12) and yr == year) or (int(yr) - int(year) == 1 and (int(month) > int(mth)))) and ('Purchase' in x['type']): # logic for less than one year
             # Check if ticker already in senate dict, if not, instantiate, if it is, append to list
-            if x['ticker'] in senate_dict.keys():
+            if x['ticker'] not in senate_dict.keys():
+                senate_dict[x['ticker']] = [[x['senator']], [x['transaction_date']], [x['amount']]]  
+            else:
                 senate_dict[x['ticker']][0].append(x['senator'])
                 senate_dict[x['ticker']][1].append(x['transaction_date'])
                 senate_dict[x['ticker']][2].append(x['amount'])
-            else:
-                senate_dict[x['ticker']] = [[x['senator']], [x['transaction_date']], [x['amount']]]
                 
             count_senate += 1
 
-    # Add senate list to house list if overlap in ticker
-    for key in senate_dict.keys():
-        if key in house_dict.keys():
-            house_dict[key][0] = house_dict[key][0].extend(senate_dict[key][0])
-            house_dict[key][1] = house_dict[key][1].extend(senate_dict[key][0])
-            house_dict[key][2] = house_dict[key][2].extend(senate_dict[key][0])
-        else: 
-            house_dict[key] = senate_dict[key]
-
-    combined_dict = house_dict
-    politician_stocks = combined_dict.keys()
-    overlap = []
-
-    for pol in politician_stocks:
-        if pol in sib_list:
-            overlap.append(pol)
+    # Combine dictionaries and consolidate 
     
-    print('Politicians and Insiders: ', overlap)
-    print('Combined Dict: ', combined_dict)
-
-    
-    #print(combined_dict)
-
-    # # Create final combined dict with number of politician buys, latest transaction, and largest amount
-    # for keys in combined_dict.keys():
-    #     print('Before: ', combined_dict[keys])
-
-    #     # Find latest transaction from list of strings
-        
-    #     current_high = 0
-
-    #     if None not in combined_dict[keys]:
-    #         latest_trans = [''.join(x) for x in combined_dict[keys][1]] 
-    #         print('Latest Trans: ', latest_trans)
-    #         for date in latest_trans:
-    #             try:
-    #                 date = date.split('-') 
-    #             except:
-    #                 date = date.split('/')
-
-    #             try:
-    #                 combined_dict[keys][0] = len(combined_dict[keys][0]) # num of buys
-    #                 current_date = int(date[0]) + (float(date[1])/12) + (float(date[2]/365))
-    #             except:
-    #                 continue
-                
-    #             if current_date > current_high:
-    #                 current_high = current_date
-    #                 high_date = (date[0] + '-' + date[1] + '-' + date[2])
-    #                 combined_dict[keys][1] = high_date
-            
-        
-
-    #     # Find largest transaction from list of strings
-    #     current_size = ' '.join(combined_dict[keys][2])
-    #     current_size = current_size.replace('$','').replace('-','').replace(',','')
-    #     current_size = current_size.split()
-    #     current_size = [int(x) for x in current_size]
-    #     current_low = 10000000
-
-    #     # Find low end of range
-    #     for size in current_size:
-    #         if size < current_low:
-    #             current_low = size
-    #     combined_dict[keys][2] = current_low
-
-    #     print('Modified: ', combined_dict[keys])
-
-    # politician_df = pd.DataFrame.from_dict(combined_dict, orient='index')
-    # print(politician_df)
-
 
 # Find stocks with significant insider buying (transactions > $100,000)
 def find_sis_of_portfolio():
@@ -580,9 +594,9 @@ def recommendation_algo():
 # Execute sequence of function calls to run program (First release package!)
 
 # setup()
-#find_sib_stocks()
-#find_sis_of_portfolio()
-find_sib_senate_stocks()
+list_all_stocks()
+recent_sibs()
+#sib_extend()
 # gen_sib_positive_pv_graphs()
 
 
@@ -593,7 +607,7 @@ test_list = ['NRDY', 'WAL', 'ET', 'PARA', 'DNB', 'OXY', 'NILE', 'RVMD', 'SUP', '
 # Insiders and politicians overlapping (insiders over last 2 months and politicians over last year)
 #test_list = ['SAVA', 'CIVI', 'ECL', 'ET', 'NEE', 'KKR', 'SBUX', 'BX', 'INTC', 'DINO', 'XOM', 'ARQT', 'WBD', 'SCI', 'JEF', 'COIN', 'MTCH', 'MRVL' 'CAG', 'DONE']
 #test_list = ['ET', 'SBUX', 'DINO', 'SCI', 'SNX', 'BRZE', 'FRSH', 'INSM', '',  'DONE'] # overlap...
-generate_pv_and_plot(test_list)
-generate_pv_and_classify(test_list)
+#generate_pv_and_plot(test_list)
+#generate_pv_and_classify(test_list)
 
 
