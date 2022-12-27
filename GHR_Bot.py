@@ -90,9 +90,8 @@ def recent_sibs():
 
     # Instantiate empty dataframe containing symbol, trans_type, trans_amount, trans_date, buyer
     COLUMN_NAMES =['Symbol','Trans Type','Trans Amount','Insider', 'Ins Date', 'Senate', 'Sen Date', 'House', 'H Date', 'Press', 'Bargain', 'PV Trend', 'Buy Strength']
-    global df # pass initial df to next functions to complete remaining columns
+    
     df = pd.DataFrame(columns=COLUMN_NAMES)
-    global symbol_list, trans_list, reg_insider_list
     symbol_list = []
     trans_list = []
     reg_insider_list = []
@@ -147,6 +146,13 @@ def recent_sibs():
 
 # Find stocks with significant insider buying (transactions > $100,000)
 def current_sib_stocks():
+    
+    # Read ghr_bot_sib_record2.csv as df and append
+    df = pd.read_csv('ghr_bot_sib_record2.csv')
+    symbol_list = df['Symbol'].tolist()
+    trans_list = df['Ins Date'].tolist()
+    reg_insider_list = df['Insider'].tolist()
+
     API_KEY_INSIDER_TRADING = cfg["API_KEY_INSIDER_TRADING"]
     API_Key_Insider = API_KEY_INSIDER_TRADING + TOKEN
 
@@ -172,11 +178,9 @@ def current_sib_stocks():
                     trans_list.append(trans_date)
                     reg_insider_list.append(insider)
 
-    # Read ghr_bot_sib_record2.csv as df and append
+    
 
-    # print(filingsJson) 
-    # print('Tick List: ', tick_list)
-    # print('Sib Dict: ', sib_dict)
+    
 
 
 
