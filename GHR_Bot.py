@@ -89,7 +89,7 @@ def recent_sibs():
     count = 0
 
     # Instantiate empty dataframe containing symbol, trans_type, trans_amount, trans_date, buyer
-    COLUMN_NAMES =['Symbol','Trans Type','Trans Amount','Insider', 'Ins Date', 'Senate', 'Sen Date', 'House', 'H Date', 'Press', 'Bargain', 'PV Trend', 'Buy Strength']
+    COLUMN_NAMES = ['Symbol','Insider', 'Ins-Count', 'Ins-Date', 'Ins-Amt', 'Senator', 'Sen-Date', 'Sen-Amt','Representative', 'Rep-Date', 'Rep-Amt', 'Press', 'Bargain', 'PV Trend', 'Buy Strength']
     
     df = pd.DataFrame(columns=COLUMN_NAMES)
     symbol_list = []
@@ -135,7 +135,7 @@ def recent_sibs():
 
             if trans_type == 'P' and trans_amount > 300000 and 'Common' in security and (((int(mth) - int(month) <= 2) and yr == year) or (int(yr) - int(year) == 1 and ((int(month) - int(mth)) >= 10))):
                 if tick not in symbol_list or trans_date not in trans_list or insider not in reg_insider_list:
-                    df.loc[len(df)] = [tick, trans_type, trans_amount, insider, trans_date, None, None, None, None, None, None, None, None] # append new row to end of df
+                    df.loc[len(df)] = [tick, insider, None, trans_date, trans_amount, None, None, None, None, None, None, None, None, None, None] # append new row to end of df
                     symbol_list.append(tick)
                     trans_list.append(trans_date)
                     reg_insider_list.append(insider)
@@ -147,7 +147,8 @@ def recent_sibs():
 # Find stocks with significant insider buying (transactions > $100,000)
 def current_sib_stocks():
     
-    # Read ghr_bot_sib_record2.csv as df and append
+    # Read ghr_bot_sib_record2.csv as df and append new sib stocks
+    
     df = pd.read_csv('ghr_bot_sib_record2.csv')
     symbol_list = df['Symbol'].tolist()
     trans_list = df['Ins Date'].tolist()
@@ -172,39 +173,77 @@ def current_sib_stocks():
         security = dics.get('securityName')
         
         if trans_type == 'P' and trans_amount > 300000 and 'Common' in security and (((int(mth) - int(month) <= 2) and yr == year) or (int(yr) - int(year) == 1 and ((int(month) - int(mth)) >= 10))):
-                if tick not in symbol_list or trans_date not in trans_list or insider not in reg_insider_list:
-                    df.loc[len(df)] = [tick, trans_type, trans_amount, insider, trans_date, None, None, None, None, None, None, None, None] # append new row to end of df
-                    symbol_list.append(tick)
-                    trans_list.append(trans_date)
-                    reg_insider_list.append(insider)
+            if tick not in symbol_list or trans_date not in trans_list or insider not in reg_insider_list:
+                df.loc[len(df)] = [tick, insider, None, trans_date, trans_amount, None, None, None, None, None, None, None, None, None, None]# append new row to end of df
+                symbol_list.append(tick)
+                trans_list.append(trans_date)
+                reg_insider_list.append(insider)
+    
+    df.to_csv('ghr_bot_sib_record2.csv')
 
+# Cleaned up df to go inside rec algo 
+def df_cleanup():
+
+    # Read df from csv and iterate through symbols
+    df = pd.read_csv('ghr_bot_sib_record2.csv')
+    symbol_list = tuple(df['Symbol'].tolist())
+    insider = tuple(df['Insider'].tolist())
+    trans_amt = tuple(df['Ins-Amt'].tolist())
+    trans_date = tuple(df['Ins-Date'].tolist())
+    cleanup_dict = {}
+    ins_list = []
+    date_list = []
+
+    for sym, ins, amt, date in zip(symbol_list, insider, trans_amt, trans_date):
+        #print('Sym: ', 'Insider: ', 'Amount', sym, ins, date)
+        if sym not in cleanup_dict.keys():
+            count = 1
+            cum_amt = amt
+            cleanup_dict[sym] = [[ins], count, [date], cum_amt]
+                
+        else: # if sym is in cleanup_dict already
+            if (ins not in cleanup_dict[sym][0] or date not in cleanup_dict[sym][2]): # Count number of unique buys
+                
+                cleanup_dict[sym][0].append(ins)
+                cleanup_dict[sym][1] += 1
+                cleanup_dict[sym][2].append(date)
+                cleanup_dict[sym][3] += amt
+
+    # Find most recent date, corresponding insider, and average sib size to store in cleaned up df
+    for sym in cleanup_dict.keys():
+        most_rec = 0
+        most_rec_idx = 0
+
+        for idx in range(len(cleanup_dict[sym][2])):
+            date = int(cleanup_dict[sym][2][idx].replace('-',''))
+
+            if date > most_rec:
+                most_rec = date
+                most_rec_idx = idx
+
+        cleanup_dict[sym][0] = cleanup_dict[sym][0][most_rec_idx] # select corresponding insider w/ most recent date
+        cleanup_dict[sym][2] = cleanup_dict[sym][2][most_rec_idx]
+        cleanup_dict[sym][3] = int(cleanup_dict[sym][3] / cleanup_dict[sym][1]) # avg trans = cum/count
+
+    # Instantiate empty dataframe containing symbol, trans_type, trans_amount, trans_date, buyer
+
+    COLUMN_NAMES = ['Insider', 'Ins-Count', 'Ins-Date', 'Ins-Amt'] # ... 'Senator', 'Sen-Date', 'Sen-Amt','Representative', 'Rep-Date', 'Rep-Amt', 'Press', 'Bargain', 'PV Trend', 'Buy Strength']
     
 
-    
-
-
+    df_clean = pd.DataFrame.from_dict(cleanup_dict, orient= 'index', columns=COLUMN_NAMES)
+    df_clean.to_csv('ghr_bot_sib_record2_cp.csv')
+            
 
 # Extend insiders to track members of senate and house and consolidate in dataframe
 def sib_extend():
-    # Open Record of SIBs in past few months
-    current_dir = os.getcwd()
-    
-    try:  
-        file_path = current_dir + '\ghr_bot_sib_record2.csv'
-        f = open(file_path, 'a+')
-        df = pd.read_csv(file_path)
-        sib_list = df['Symbol'].tolist()
 
-    except:
-        print('Could not open sib log!')
-        sys.exit(1)
+    # Read ghr_bot_sib_record2.csv as df and append new sib stocks
+    df = pd.read_csv('ghr_bot_sib_record2_cp.csv')
+    symbol_list = list(df.index.values)
 
     # Find current date
-    global senate_dict
-    global house_dict
     senate_dict = {}
     house_dict = {}
-    combined_dict = {}
     date = str(datetime.date.today()).split('-')
     yr, mth, day = date
 
@@ -222,7 +261,7 @@ def sib_extend():
     count_senate = 0
     count_house = 0
     
-    # Prints all the house senate buys
+    # Add all house buys to sib dataframe
     for x in json_house: 
         trans_date = x['transaction_date'].split('-')
         year, month, day = trans_date
@@ -234,14 +273,14 @@ def sib_extend():
             else:
                 house_dict[x['ticker']][0].append(x['representative'])
                 house_dict[x['ticker']][1].append(x['transaction_date'])
-                house_dict[x['ticker']][2].append(x['amount'])
-                
+                house_dict[x['ticker']][2].append(x['amount'])         
             
     # Prints all the senate senate buys
     for x in json_senate:
         trans_date = x['transaction_date'].split('/')
         month, day, year = trans_date
-        if (((int(mth) - int(month) <= 12) and yr == year) or (int(yr) - int(year) == 1 and (int(month) > int(mth)))) and ('Purchase' in x['type']): # logic for less than one year
+        #if (((int(mth) - int(month) <= 12) and yr == year) or (int(yr) - int(year) == 1 and (int(month) > int(mth)))) and ('Purchase' in x['type']): # logic for less than one year
+        if (((int(mth) - int(month) <= 3) and yr == year) or (int(yr) - int(year) == 1 and ((int(month) - int(mth)) >= 9))) and ('Purchase' in x['type']): # logic for less than 3 months
             # Check if ticker already in senate dict, if not, instantiate, if it is, append to list
             if x['ticker'] not in senate_dict.keys():
                 senate_dict[x['ticker']] = [[x['senator']], [x['transaction_date']], [x['amount']]]  
@@ -252,7 +291,15 @@ def sib_extend():
                 
             count_senate += 1
 
+    # Add senate and house buys to cleaned data frame. First check if tick already in df, if it is, edit key, if not, add. 
+    for senate_buy, house_buy in zip(senate_dict.keys(), house_dict.keys()):
+        print(house_buy)
+
     # Combine dictionaries and consolidate 
+    # print('################ HOUSE ################## \n')
+    # print(house_dict)
+    # print('################  ################## \n')
+    # print(senate_dict)
     
 
 # Find stocks with significant insider buying (transactions > $100,000)
@@ -598,8 +645,10 @@ def recommendation_algo():
 # Execute sequence of function calls to run program (First release package!)
 
 # setup()
-list_all_stocks()
-recent_sibs()
+# list_all_stocks()
+# recent_sibs()
+#current_sib_stocks()
+df_cleanup()
 #sib_extend()
 # gen_sib_positive_pv_graphs()
 
