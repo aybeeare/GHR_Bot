@@ -227,20 +227,22 @@ def df_cleanup():
 
     # Instantiate empty dataframe containing symbol, trans_type, trans_amount, trans_date, buyer
 
-    COLUMN_NAMES = ['Insider', 'Ins-Count', 'Ins-Date', 'Ins-Amt'] # ... 'Senator', 'Sen-Date', 'Sen-Amt','Representative', 'Rep-Date', 'Rep-Amt', 'Press', 'Bargain', 'PV Trend', 'Buy Strength']
-    
+    COLUMN_NAMES = ['Insider', 'Ins-Count', 'Ins-Date', 'Ins-Amt'] # ... 'Representative', 'Rep-Date', 'Rep-Amt', 'Senator', 'Sen-Date', 'Sen-Amt', 'Press', 'Bargain', 'PV Trend', 'Buy Strength']
 
-    df_clean = pd.DataFrame.from_dict(cleanup_dict, orient= 'index', columns=COLUMN_NAMES)
-    df_clean.to_csv('ghr_bot_sib_record2_cp.csv')
-            
+    df_clean = pd.DataFrame.from_dict(cleanup_dict, orient='index', columns=COLUMN_NAMES)
+    df_clean.to_csv('ghr_bot_sib_record2_cp.csv')     
 
 # Extend insiders to track members of senate and house and consolidate in dataframe
 def sib_extend():
 
-    # Read ghr_bot_sib_record2.csv as df and append new sib stocks
+    # Read ghr_bot_sib_record2_cp.csv as df and append new sib stocks from politicians
     df = pd.read_csv('ghr_bot_sib_record2_cp.csv')
-    symbol_list = list(df.index.values)
+    df.rename( columns={'Unnamed: 0' :'Symbol'}, inplace=True)
+    symbol_list = df['Symbol'].tolist()
 
+    # Instantiate Empty Lists for House and Senate
+    rep, rep_date, rep_amt, sen, sen_date, sen_amt = ([] for i in range(6))
+    
     # Find current date
     senate_dict = {}
     house_dict = {}
@@ -266,14 +268,15 @@ def sib_extend():
         trans_date = x['transaction_date'].split('-')
         year, month, day = trans_date
 
-        if (((int(mth) - int(month) <= 12) and yr == year) or (int(yr) - int(year) == 1 and (int(month) > int(mth)))) and ('purchase' in x['type']): # logic for less than one year
+        if (((int(mth) - int(month) <= 3) and yr == year) or (int(yr) - int(year) == 1 and ((int(month) - int(mth)) >= 9))) and ('purchase' in x['type']): # logic for less than one year
             # Check if ticker already in house dict, if not, instantiate, if it is, append to list
             if x['ticker'] not in house_dict.keys():
                 house_dict[x['ticker']] = [[x['representative']], [x['transaction_date']], [x['amount']]]
             else:
                 house_dict[x['ticker']][0].append(x['representative'])
                 house_dict[x['ticker']][1].append(x['transaction_date'])
-                house_dict[x['ticker']][2].append(x['amount'])         
+                house_dict[x['ticker']][2].append(x['amount'])   
+
             
     # Prints all the senate senate buys
     for x in json_senate:
@@ -290,12 +293,152 @@ def sib_extend():
                 senate_dict[x['ticker']][2].append(x['amount'])
                 
             count_senate += 1
+    
+    for tick in symbol_list: # Still only going for stocks that insiders bought in last 3 months, politicians alone not enough
+        if tick in house_dict.keys() or tick in senate_dict.keys():
+            if tick in house_dict.keys() and tick not in senate_dict.keys():
 
-    # Add senate and house buys to cleaned data frame. First check if tick already in df, if it is, edit key, if not, add. 
-    for senate_buy, house_buy in zip(senate_dict.keys(), house_dict.keys()):
-        print(house_buy)
+                # Find most recent date from list of dates
+                most_rec = 0
+                most_rec_idx = 0
 
-    # Combine dictionaries and consolidate 
+                for idx in range(len(house_dict[tick][1])):
+                    date = int(house_dict[tick][1][idx].translate({ord(c): "" for c in ",-/"}))
+
+                    if date > most_rec:
+                        most_rec = date
+                        most_rec_idx = idx
+
+                current_larg = 0
+
+                # Find largest amount in list of amounts (strings)
+                
+                for amt in house_dict[tick][2]:
+                    amt = amt.translate({ord(c): "" for c in "$,-"})
+                    amt = int(amt.split(" ")[0])
+                    
+                    if amt > current_larg:
+                        current_larg = amt
+
+                #print(tick, amt)
+                rep.append([house_dict[tick][0][most_rec_idx],len(house_dict[tick][0])])
+                rep_date.append(house_dict[tick][1][most_rec_idx])
+                rep_amt.append(current_larg) 
+                sen.append(0)
+                sen_date.append(0)
+                sen_amt.append(0)
+            
+            elif tick in senate_dict.keys() and tick not in house_dict.keys():
+
+                # Find most recent date from list of dates
+                most_rec = 0
+                most_rec_idx = 0
+
+                for idx in range(len(senate_dict[tick][1])):
+                    date = int(senate_dict[tick][1][idx].translate({ord(c): "" for c in ",-/"}))
+
+                    if date > most_rec:
+                        most_rec = date
+                        most_rec_idx = idx
+
+                current_larg = 0
+
+                # Find largest amount in list of amounts (strings)
+                
+                for amt in senate_dict[tick][2]:
+                    amt = amt.translate({ord(c): "" for c in "$,-"})
+                    amt = int(amt.split(" ")[0])
+                    
+                    if amt > current_larg:
+                        current_larg = amt
+
+                #print(tick, amt)
+                sen.append([senate_dict[tick][0][most_rec_idx],len(senate_dict[tick][0])])
+                sen_date.append(senate_dict[tick][1][most_rec_idx])
+                sen_amt.append(current_larg)
+                rep.append(0)
+                rep_date.append(0)
+                rep_amt.append(0)
+
+            else: # tick in both
+
+                # Find most recent date from list of dates
+                most_rec = 0
+                most_rec_idx = 0
+
+                for idx in range(len(house_dict[tick][1])):
+                    date = int(house_dict[tick][1][idx].translate({ord(c): "" for c in ",-/"}))
+
+                    if date > most_rec:
+                        most_rec = date
+                        most_rec_idx = idx
+
+                current_larg = 0
+
+                # Find largest amount in list of amounts (strings)
+                
+                for amt in house_dict[tick][2]:
+                    amt = amt.translate({ord(c): "" for c in "$,-"})
+                    amt = int(amt.split(" ")[0])
+                    
+                    if amt > current_larg:
+                        current_larg = amt   
+
+                rep.append([house_dict[tick][0][most_rec_idx],len(house_dict[tick][0])])
+                rep_date.append(house_dict[tick][1][most_rec_idx])
+                rep_amt.append(current_larg)
+
+                # Find most recent date from list of dates
+                most_rec = 0
+                most_rec_idx = 0
+
+                for idx in range(len(senate_dict[tick][1])):
+                    date = int(senate_dict[tick][1][idx].translate({ord(c): "" for c in ",-/"}))
+
+                    if date > most_rec:
+                        most_rec = date
+                        most_rec_idx = idx
+
+                current_larg = 0
+
+                # Find largest amount in list of amounts (strings)
+                
+                for amt in senate_dict[tick][2]:
+                    amt = amt.translate({ord(c): "" for c in "$,-"})
+                    amt = int(amt.split(" ")[0])
+                    
+                    if amt > current_larg:
+                        current_larg = amt
+
+                sen.append([senate_dict[tick][0][most_rec_idx],len(senate_dict[tick][0])])
+                sen_date.append(senate_dict[tick][1][most_rec_idx])
+                sen_amt.append(current_larg)
+                print(tick, amt)
+
+        else: # tick not in either house or senate
+            rep.append(0)
+            rep_date.append(0)
+            rep_amt.append(0)
+            sen.append(0)
+            sen_date.append(0)
+            sen_amt.append(0)
+
+    # Update DF
+    df['Representative'] = rep
+    df['Rep-Date'] = rep_date
+    df['Rep-Amt'] = rep_amt
+    df['Senator'] = sen
+    df['Sen-Date'] = sen_date
+    df['Sen-Amt'] = sen_amt
+
+    df.to_csv('ghr_bot_sib_record_clean.csv')  
+                
+
+        
+            
+            
+
+    # # Combine dictionaries and consolidate 
     # print('################ HOUSE ################## \n')
     # print(house_dict)
     # print('################  ################## \n')
@@ -648,8 +791,8 @@ def recommendation_algo():
 # list_all_stocks()
 # recent_sibs()
 #current_sib_stocks()
-df_cleanup()
-#sib_extend()
+#df_cleanup()
+sib_extend()
 # gen_sib_positive_pv_graphs()
 
 
