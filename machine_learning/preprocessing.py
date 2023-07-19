@@ -3,7 +3,7 @@ import numpy as np
 
 # Preprocessing methods including initial cleanup of csv, normalization methods, and analyzing dataset variance
 
-def cleanup():
+def train_cleanup():
     # Preliminary feature screen and remove labels (ticker name, date, and labels) so remaining dataset can be normalized
     df = pd.read_csv('ML_Dataset_Clean.csv')
     
@@ -24,8 +24,45 @@ def cleanup():
                     'Mon-9-Price', 'Mon-12-Price']
     
     df = df.drop(labels = unwanted_col, axis = 1)
+    # print('Training Set')
+    # print(df)
     unnormalized_data = df.to_numpy()
     return unnormalized_data
+
+# After collecting new insider buys to be fed into ML framework (stored in ML_Unlabeled.csv), clean to fit model.
+def new_buys_format():
+
+    df = pd.read_csv('ML_Unlabeled_Current.csv')
+    
+    unwanted_col = ['Unnamed: 0', 'Unnamed: 0.1', 'Unnamed: 0.2', 'symbol', 'date', 'period', 'symbol.1', 'date.1', 'period.1', 'Insider', 
+                    'Representative', 'Senator', 'operatingCashFlowPerShare.1','freeCashFlowPerShare.1','cashPerShare.1', 'priceToSalesRatio.1', 
+                'currentRatio.1','interestCoverage.1', 'dividendYield.1','payoutRatio.1', 'receivablesTurnover.1', 'payablesTurnover.1', 
+                'inventoryTurnover.1', 'Rep-Date', 'Rep-Amt', 'Ins-Date',
+                'Sen-Date', 'Sen-Amt']
+
+    df = df.drop(labels = unwanted_col, axis = 1) # Get rid of unwanted columns  
+    
+    days_payable_values = df['daysOfPayablesOutstanding'].tolist() # has a difference between 0.0 and nan so if this is nan, get rid of it because pull failed
+
+    # Remove data point by index if feat "daysOfPayablesOutstanding" is nan
+    idx_list = []
+    for idx in range(len(days_payable_values)):
+
+        if pd.isna(days_payable_values[idx]):
+            idx_list.append(idx)
+
+    df = df.drop(labels = idx_list, axis = 0)
+    df = df.fillna(0) # fill remaining nan with 0
+    new_buys_df = df.sample(frac = 1)
+    
+    test_symbols = new_buys_df['Symbol'].tolist()
+    new_buys_df = new_buys_df.drop(labels = 'Symbol', axis = 1)
+    df.to_csv('Unlabeled_Test_Fixed.csv')
+    # print('Full Dataset\n')
+    # print(new_buys_df)
+    new_buys = new_buys_df.to_numpy()
+
+    return new_buys, test_symbols
 
 # Normalization
 def min_max_normalization(unnormalized_data):
@@ -79,3 +116,4 @@ def get_dataset_stats(unnormalized_data):
     
     return column_var
 
+new_buys_format()

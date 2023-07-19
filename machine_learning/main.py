@@ -1,5 +1,7 @@
 # Main script for testing ensemble techniques
 
+from GHR_Bot import *
+import operator
 import os
 import numpy as np
 import pandas as pd
@@ -24,10 +26,27 @@ def test_bagging(classifiers, filters, its, bagging_its):
         conf_matrices = []
         
         for i in range(its):
-            conf_matrix = bagging(model, filt, bagging_its, num_feats=20) # bagging at 15 good, bagging at 10?
+            conf_matrix, recs_list = bagging(model, filt, bagging_its, True, num_feats=20) # bagging at 15 good, bagging at 10?
             conf_matrices.append(conf_matrix)
             sum_conf += conf_matrix
+
+            # Count up number of times tick is recommended in recs_list (taking the ensemble of the ensemble idea :) )
+            if i == 0:
+                tick_tally = dict(zip(recs_list, [0]*len(recs_list)))
             
+            else: # If tick in recs_list in dict, increment, else, instantiate with value 0.
+
+                for new_rec in recs_list:
+
+                    if new_rec in tick_tally.keys():
+                        tick_tally[new_rec] += 1
+                    else:
+                        tick_tally[new_rec] = 1
+        
+        tick_tally.update((x, y/its) for x, y in tick_tally.items())
+        tick_tally = sorted(tick_tally.items(),key=operator.itemgetter(1),reverse=True)
+        print('Dictionary Tick...', tick_tally)
+
         avg_conf_matrix = np.divide(sum_conf, divider)
         
         # Compute std
@@ -121,10 +140,14 @@ def main():
     
     # Calling various functions to collect data...
     
-    # classifiers = ['xg', 'xg', 'xg', 'cat', 'cat', 'cat', 'knn', 'knn'] # still need cat and mrmr
+    # classifiers = ['xg', 'xg', 'xg', 'cat', 'cat', 'cat', 'knn', 'knn'] 
     # filters = ['mrmr', 'vr', 'avr', 'correlation', 'mrmr', 'avr', 'mrmr', 'vr']
+
+    fetch_current(0) # Run GHR Bot to Fetch sibs this month (and spit out preprocessing)
+    classifiers = ['xg'] 
+    filters = ['mrmr']
     
-    # test_bagging(classifiers, filters, its = 10, bagging_its = 40)
+    test_bagging(classifiers, filters, its = 100, bagging_its = 40)
     
     # filters = ['mrmr', 'avr', 'vr', 'mrmr', 'avr', 'vr', 'mrmr', 'avr', 'vr']
     # svms = [False, False, False, True, True, True, False, False, False]

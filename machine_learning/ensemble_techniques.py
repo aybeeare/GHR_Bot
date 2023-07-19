@@ -1,5 +1,6 @@
 # Preprocessing Functions to Try
 
+import os
 import sys
 import pandas as pd
 import numpy as np
@@ -27,7 +28,7 @@ from classes import Classifier
 #def main():
 
 
-def stacking(classifier_dict, filt, use_svm, use_nb): #classifiers_list, filters):
+def stacking(classifier_dict, filt, use_svm, use_nb, pred_newbuys): #classifiers_list, filters):
     
     # classifiers: dict with string for classifier name as key and number of votes in ensemble as value
     # filt: string of filter to apply
@@ -43,7 +44,7 @@ def stacking(classifier_dict, filt, use_svm, use_nb): #classifiers_list, filters
             
             classifiers.append(key)
     
-    unnormalized_data = cleanup()
+    unnormalized_data = train_cleanup()
     normalized = z_normalization(unnormalized_data)  
     #normalized = min_max_normalization(unnormalized_data)
         
@@ -151,14 +152,18 @@ def stacking(classifier_dict, filt, use_svm, use_nb): #classifiers_list, filters
     return confusion_matrix
 
 
-def bagging(classifier_type, filt, iterations, num_feats): #classifiers_list, filters):
+def bagging(classifier_type, filt, iterations, pred_newbuys, num_feats): #classifiers_list, filters):
     
     # classifiers: List of strings naming classifiers to test
     # filt: string of filter to apply
     
-    unnormalized_data = cleanup()
-    normalized = min_max_normalization(unnormalized_data)
-    #normalized = z_normalization(unnormalized_data)  
+    unnormalized_data = train_cleanup()
+    unnormalized_newbuys, test_syms = new_buys_format()
+    normalized = z_normalization(unnormalized_data)
+    #normalized = min_max_normalization(unnormalized_data)
+    normalized_newbuys = z_normalization(unnormalized_newbuys)
+    #normalized_newbuys = min_max_normalization(unnormalized_newbuys)
+     
     # Figure out how to initialize zeros matrix with correct size (len(y_pred), len(classifiers)*len(filters)), don't know len(y_pred) till after split
         
     
@@ -192,19 +197,20 @@ def bagging(classifier_type, filt, iterations, num_feats): #classifiers_list, fi
         
     else: # wrong filter specified
         raise Exception('Wrong filter specified')
-        
-    
-    if feat_select_filter: # if method returns feature indices
-    
-        X = normalized[:, feats_selected] # select all columns removing last
-        
+
+    X = normalized[:, feats_selected] # select all columns removing last
     y = normalized[:, -1] # select last column
-    
-    X_training_set, X_test, y_training_set, y_test = train_test_split(X, y, test_size=0.2) # random_state = 0 for repeatability, get filtered X_test and y_test to test classifier
-    
-    y_preds = np.zeros((y_test.shape[0], iterations)) # size for 20% test split
-    
+    X_training_set, X_test, y_training_set, y_test = train_test_split(X, y, test_size=0.05) # random_state = 0 for repeatability, get filtered X_test and y_test to test classifier
+    y_preds = np.zeros((X_test.shape[0], iterations)) # size for 20% test split
+        
+    if feat_select_filter and pred_newbuys:
+
+        X_test = normalized_newbuys[:, feats_selected] # using new buys as test set 
+        y_test = np.zeros((X_test.shape[0],)) # dummy y_test, unused in this case since pred_newbuys have no labels. Just format fcn. inputs
+        y_preds = np.zeros((X_test.shape[0], iterations)) # prediction for each new buy  
+
     i = 0 # populate matrices above by column index
+
     for its in range(iterations):
         
         # Select random set of features from training set and perform split
@@ -248,31 +254,57 @@ def bagging(classifier_type, filt, iterations, num_feats): #classifiers_list, fi
         i += 1
 
     # Figure out committee vote by taking the row-wise mode of the preds matrix, compare resulting array with y_tests (the true values for the preds)
-    np.savetxt("foo.csv", y_preds, delimiter=",")
+    #np.savetxt("foo.csv", y_preds, delimiter=",")
     y_pred = stats.mode(y_preds, axis=1)
     y_pred_list = []
     for x in y_pred[0]:
         y_pred_list.append(int(x[0]))
     y_pred = np.array(y_pred_list)
+
+    if pred_newbuys:
+        newbuys_labeled = np.concatenate((np.atleast_2d(np.array(test_syms)).T, unnormalized_newbuys, np.atleast_2d(y_pred).T), axis=1)
+        newbuys_recs_df = pd.DataFrame(newbuys_labeled)
+        # print('New Buys Recs Dataframe:')
+        # print(newbuys_recs_df)
+        # newbuys_recs_df.to_csv('newbuys_bagging_recs.csv')
+
+        # Identify Strong Buys, Store in DF, write to csv...
+
+        recs_list = []
+
+        for sym, pred in zip(test_syms, y_pred_list):
+
+            if pred == 2 and sym not in recs_list:
+
+                recs_list.append(sym)
+        
+        print('Recs List: ', len(recs_list))
+        pd.DataFrame(np.array(recs_list)).to_csv('Rec_Tickers.csv')
+        confusion_matrix = np.zeros((3,3))
+        return confusion_matrix, recs_list
+
+
+
     #print('y_pred list: ', y_pred)
     #print('Shape of y_pred', y_pred[0])
     #print('Shape of y_test', y_test)
     #accuracy = accuracy_score(y_pred, y_test)
     #print("Accuracy score: %.2f" % accuracy)
+
     confusion_matrix = metrics.confusion_matrix(y_test, y_pred)
+    return confusion_matrix, y_pred_list
     #print('Confusion Matrix: ', confusion_matrix)
     # cm_display = metrics.ConfusionMatrixDisplay(confusion_matrix = confusion_matrix)
     # cm_display.plot()
     # plt.show()
     
-    return confusion_matrix
 
 # Used built in functions to do stacking to validate my from scratch function, results same :)
 def stacking_with_built_ins(filt, use_svm, use_nb):
     
     # Followed: https://machinelearningmastery.com/stacking-ensemble-machine-learning-with-python/
     
-    unnormalized_data = cleanup()
+    unnormalized_data = train_cleanup()
     normalized = z_normalization(unnormalized_data)  
     #normalized = min_max_normalization(unnormalized_data)  
     # Figure out how to initialize zeros matrix with correct size (len(y_pred), len(classifiers)*len(filters)), don't know len(y_pred) till after split

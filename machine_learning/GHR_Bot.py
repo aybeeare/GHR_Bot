@@ -3,6 +3,7 @@
 # buys over the years, with the intention of applying machine learning algorithms to this dataset to model
 # which insider buy stocks to select for best investment strategy :)
 
+from preprocessing import new_buys_format
 import platform
 import sys
 import os
@@ -84,11 +85,12 @@ def list_all_stocks():
     stocks_tup = tuple(stocks)
     print('Done List All Stocks!')
 
-# Find all sibs for all stocks within the past 2 months
+# Find all sibs for all stocks within the past year months
 def recent_sibs(test_year):
+
     # Find current date and time to check how recent and only run this code periodically and allow for keyboard interrupts
     date = str(datetime.date.today()).split('-')
-    global yr, mth
+    global yr, mth, day
     yr, mth, day = date
     count = 0
 
@@ -111,6 +113,7 @@ def recent_sibs(test_year):
         count_high = False
 
         #print('Tick: ', tick)
+        time.sleep(0.25) # too many requests per minute error, slow it down.
         API_Key_Insider = API_KEY_INSIDER_BUYING + str(tick) + '&page=0&apikey=' + TOKEN
         #print('API KEY: ', API_Key_Insider)
 
@@ -120,9 +123,6 @@ def recent_sibs(test_year):
         res_body = response.read().decode('utf-8') # read response
         filingsJson = json.loads(res_body) # transform response into json (data is list of dictionaries)
         
-        #print(filingsJson)
-
-        # Compare significant insider sells with portfolio holdings, if match, alert...
         for dics in filingsJson:
             #print(dics)
             try:
@@ -159,41 +159,58 @@ def recent_sibs(test_year):
     df.to_csv('ghr_bot_sib_record2.csv')
     print('Done Recent Sibs!')
 
-# Find stocks with significant insider buying (transactions > $100,000)
-def current_sib_stocks():
-    
-    # Read ghr_bot_sib_record2.csv as df and append new sib stocks
-    
-    df = pd.read_csv('ghr_bot_sib_record2.csv')
-    symbol_list = df['Symbol'].tolist()
-    trans_list = df['Ins-Date'].tolist()
-    reg_insider_list = df['Insider'].tolist()
+# Find stocks with significant insider buying (transactions > $300,000)
+def current_sib_stocks(months):
 
-    API_KEY_INSIDER_TRADING = cfg["API_KEY_INSIDER_TRADING"]
-    API_Key_Insider = API_KEY_INSIDER_TRADING + TOKEN
-
-    # Pull Insider Trading Data from API
-    req = urllib.request.Request(API_Key_Insider) # instantiate request
-    response = urllib.request.urlopen(req) # send request to API
-    res_body = response.read().decode('utf-8') # read response
-    filingsJson = json.loads(res_body) # transform response into json (data is list of dictionaries)
-
-    for dics in filingsJson:
-        tick = dics.get('symbol')
-        trans_type = dics.get('transactionType')[0] # 'S-Sale' or 'P-Purchase'
-        trans_amount = int(dics.get('price'))*int(dics.get('securitiesTransacted'))
-        trans_date = dics.get('transactionDate')
-        year, month, day = trans_date.split('-')
-        insider = dics.get('reportingName')
-        security = dics.get('securityName')
-        
-        if trans_type == 'P' and trans_amount > 300000 and 'Common' in security and (((int(mth) - int(month) <= 2) and yr == year) or (int(yr) - int(year) == 1 and ((int(month) - int(mth)) >= 10))):
-            if tick not in symbol_list or trans_date not in trans_list or insider not in reg_insider_list:
-                df.loc[len(df)] = [tick, insider, None, trans_date, trans_amount, None, None, None, None, None, None, None, None, None, None]# append new row to end of df
-                symbol_list.append(tick)
-                trans_list.append(trans_date)
-                reg_insider_list.append(insider)
+    # Find current date and time to check how recent and only run this code periodically and allow for keyboard interrupts
+    date = str(datetime.date.today()).split('-')
+    global yr, mth, day
+    yr, mth, day = date
     
+    # Instantiate empty dataframe containing symbol, trans_type, trans_amount, trans_date, buyer
+    COLUMN_NAMES = ['Symbol','Insider', 'Ins-Count', 'Ins-Date', 'Ins-Amt', 'Senator', 'Sen-Date', 'Sen-Amt','Representative', 'Rep-Date', 'Rep-Amt', 'Press', 'Bargain', 'PV Trend', 'Buy Strength']
+    
+    df = pd.DataFrame(columns=COLUMN_NAMES)
+    symbol_list = []
+    trans_list = []
+    reg_insider_list = []
+
+    API_KEY_INSIDER_BUYING = cfg["API_KEY_INSIDER_TICK"]
+    
+
+    for tick in stocks_tup:
+
+        # Pull Insider Trading Data from API
+        time.sleep(0.05) # too many requests per minute error, slow it down.
+        API_Key_Insider = API_KEY_INSIDER_BUYING + str(tick) + '&page=0&apikey=' + TOKEN
+        req = urllib.request.Request(API_Key_Insider) # instantiate request
+        response = urllib.request.urlopen(req) # send request to API
+        res_body = response.read().decode('utf-8') # read response
+        filingsJson = json.loads(res_body) # transform response into json (data is list of dictionaries)
+
+        for dics in filingsJson:
+            
+            try:
+                tick = dics.get('symbol')
+                trans_type = dics.get('transactionType')[0] # 'S-Sale' or 'P-Purchase'
+                trans_amount =  (float(dics.get('price')))*(float(dics.get('securitiesTransacted')))
+                trans_date = dics.get('transactionDate')
+                year, month, day = trans_date.split('-')
+                insider = dics.get('reportingName')
+                security = dics.get('securityName')
+
+            except:
+                continue
+            
+            if trans_type == 'P' and trans_amount > 300000 and 'Common' in security and (((int(mth) - int(month) <= months) and yr == year) or (int(yr) - int(year) == 1 and ((int(month) - int(mth)) >= (12 - months)))):
+                if tick not in symbol_list or trans_date not in trans_list or insider not in reg_insider_list:
+                    df.loc[len(df)] = [tick, insider, None, trans_date, trans_amount, None, None, None, None, None, None, None, None, None, None]# append new row to end of df
+                    symbol_list.append(tick)
+                    trans_list.append(trans_date)
+                    reg_insider_list.append(insider)
+    
+    df_str = 'recents_' + str(yr) + '_' + str(mth) + '_' + str(day)
+    df.to_csv(df_str)
     df.to_csv('ghr_bot_sib_record2.csv')
 
 # Cleaned up df to go inside rec algo 
@@ -476,6 +493,9 @@ def sib_extend_fundamental_ratios():
     for tick, ins_date, i in zip(symbol_list, date_list, range(len(symbol_list))):
 
         try:
+            print('Tick: ', tick)
+            # print('Insider Date: ', ins_date)
+            # print('############################')
             API_KEY_RATIOS = cfg["API_KEY_RATIOS"]
             API_Key_Insider = API_KEY_RATIOS + str(tick) + '?period=quarter&limit=140&apikey=' + TOKEN 
 
@@ -488,7 +508,8 @@ def sib_extend_fundamental_ratios():
             #count += 1
 
         except:
-            #print('Continued')
+            print('Tick Continued: ', tick)
+            print('Continued')
             continue
         
         for dics in filingsJson:
@@ -548,6 +569,7 @@ def sib_extend_fundamental_metrics():
     for tick, ins_date, i in zip(symbol_list, date_list, range(len(symbol_list))):
 
         try:
+            print('Tick: ', tick)
             API_KEY_METRICS = cfg["API_KEY_METRICS"]
             API_Key_Insider = API_KEY_METRICS + str(tick) + '?period=quarter&limit=130&apikey=' + TOKEN 
 
@@ -557,10 +579,11 @@ def sib_extend_fundamental_metrics():
             res_body = response.read().decode('utf-8') # read response
             filingsJson = json.loads(res_body) # transform response into json (data is list of dictionaries)
             #print(filingsJson)
-            #count += 1
+            
 
         except:
             #print('Continued')
+            print('Tick Continued: ', tick)
             continue
         
         for dics in filingsJson:
@@ -588,14 +611,13 @@ def sib_extend_fundamental_metrics():
     
     #print('Count', count)
     df = pd.concat([df1, df2], axis = 1)
-    #print(df)
-    df.to_csv('ML_Dataset_Feats2.csv')  
+    df.to_csv('ML_Unlabeled_Current.csv')  
     print('Done Fundamental Metrics!')
 
 # Find 3, 6, and 12 month returns for each stock in list, and label
 def read_and_label(test_year):
 
-    df1 = pd.read_csv('ML_Dataset_Feats2.csv')
+    df1 = pd.read_csv('ML_Unlabeled.csv')
     df1 = df1.drop(df1.columns[[0,1,2,14,15,16,71,72,73]], axis = 1)
     #df1.to_csv('test.csv')  
     symbol_list = df1['Symbol'].tolist()
@@ -1128,7 +1150,7 @@ def generate_pv_and_classify(input_list):
 # returns a dataframe of ticks w/ insider buying, current pric (deal or not), pv trend, press release
 # soon after insider buy? 
 def gen_prospective_buys_df(): 
-    print()
+    pass
 
 def gen_portfolio_management_df():
     pass
@@ -1138,34 +1160,47 @@ def recommendation_algo():
 
 # Execute main script to generate csv files for each of the following years ago, specified in recent_sibs fcn
 
-years_ago_list = [9] # Takes list of "years_ago" to check, e.g. 9 would be 2023 - 9 = 2014, gets all insiders this year.
+def build_dataset():
 
-for years_ago in years_ago_list:
+    years_ago_list = [1] # Takes list of "years_ago" to check, e.g. 9 would be 2023 - 9 = 2014, gets all insiders this year.
 
-    start_time = time.time()
-    list_all_stocks()
-    try:
-        recent_sibs(years_ago) # current_sib_stocks()
-    except:
-        continue           
-    df_cleanup()
-    sib_extend_politicians()
-    sib_extend_fundamental_ratios()
+    for years_ago in years_ago_list:
+
+        start_time = time.time()
+        list_all_stocks()
+        try:
+            recent_sibs(years_ago) # current_sib_stocks()
+        except:
+            continue           
+        df_cleanup()
+        sib_extend_politicians()
+        sib_extend_fundamental_ratios()
+        sib_extend_fundamental_metrics()
+        read_and_label(years_ago)
+
+        end_time = time.time()
+        print('Years Ago Done!: ', years_ago)
+        print('Execution Time (s)', end_time - start_time)
+
+# Function that fetches current sibs within specified number of months ago 
+def fetch_current(months):
+
+    # list_all_stocks()
+    # #recent_sibs(test_year)
+    # current_sib_stocks(months)
+    # df_cleanup()
+    # sib_extend_politicians()
+    # sib_extend_fundamental_ratios()
     sib_extend_fundamental_metrics()
-    read_and_label(years_ago)
-
-    end_time = time.time()
-    print('Years Ago Done!: ', years_ago)
-    print('Execution Time (s)', end_time - start_time)
+    new_buys_format()
 
 
-# Test sequence for classifier
+# def main():
+#     fetch_current(0) # fetch recents for current year (0 years back)
 
-#test_list = ['NRDY', 'WAL', 'ET', 'PARA', 'DNB', 'OXY', 'NILE', 'RVMD', 'SUP', 'TDW', 'DONE']
+# if __name__ == '__main__':
+#     main()
 
-# Insiders and politicians overlapping (insiders over last 2 months and politicians over last year)
-#test_list = ['SAVA', 'CIVI', 'ECL', 'ET', 'NEE', 'KKR', 'SBUX', 'BX', 'INTC', 'DINO', 'XOM', 'ARQT', 'WBD', 'SCI', 'JEF', 'COIN', 'MTCH', 'MRVL' 'CAG', 'DONE']
-#test_list = ['ET', 'SBUX', 'DINO', 'SCI', 'SNX', 'BRZE', 'FRSH', 'INSM', '',  'DONE'] # overlap...
 #generate_pv_and_plot(test_list)
 #generate_pv_and_classify(test_list)
 
